@@ -14,6 +14,7 @@ library(dplyr) # data handling
 library(tidyr) # data handling
 library(ggplot2) # plotting
 library(ggthemes) # plotting
+library(viridis) # plotting
 library(here) # handling paths
 library(rfishbase) #for retrieving TLs from fishbase
 ```
@@ -96,4 +97,155 @@ Cumulated biomass for TL class
 
 ```{r}
 
+cumbio <- dat |> 
+	group_by(area_name, year, fTLr) |> 
+	summarise(B = sum(tonnes)) |> # total biomass for TL class
+	ungroup(fTLr) |> 
+	arrange(area_name, year, fTLr) |> # order by TL
+	mutate(ycum = cumsum(B)) |> # cumulative biomass
+	mutate(ycurv = ycum / max(ycum)) #relative cumulative biomass
+	
+
+```
+
+We can plot all the curves to compare the different zones, or to see if they cange over time.
+
+```{r}
+ggplot(cumbio, aes(fTLr, ycurv, colour = year, group = (year))) +
+	geom_point(alpha = 0.5, size = 0.6) + 
+	geom_line(alpha = 0.5) +
+	facet_grid(.~ area_name) +
+	scale_color_viridis_c(option = "magma") +
+	theme_few() +
+	xlab("TL") +
+	ylab("Relative Cumulative Biomass") +
+	ggtitle("Observed cumulative biomass curves")
+
+```
+
+or just focus on one curve:
+
+```{r}
+ex <- cumbio |> filter(area_name == "Italy (mainland)", year == 1980)
+
+ex_plot <- ggplot(ex, aes(fTLr, ycurv)) +
+	geom_point(alpha = 0.5, size = 0.6) + 
+	geom_line(alpha = 0.5, lty = 3) +
+	facet_grid(.~ area_name) +
+	theme_few() +
+	xlab("TL") +
+	ylab("Relative Cumulative Biomass") +
+	ggtitle("Observed cumulative biomass curves")
+
+print(ex_plot)
+```
+
+## Fit the curves and extract the parameters
+
+we can leverage the `baro5` function from the `drc` package to fit the baroreflex 5-parameter function to the TL/ relative cumulative biomass relationship
+
+We can define a function to fit the model (fixing the upper asymptote to 1), and extract some parameters to summarize the characteristics of the curve
+
+```{r}
+
+mycurve <- function(x, y){
+	
+	# fit the model
+  r <- drm(y ~ x, fct = baro5(fixed = c(NA, NA, NA, 1, NA)))
+
+  # use the fitted curve to predict the expected values (these are used fot plotting and estimating the parameters)
+  
+  # xx are the TLs
+  xx <- NA;
+  xx <- seq(1.6, 5,length.out=10000)
+  pr <- NA; length(pr) <- 10000# vector for prediction
+  pr <- predict(r, newdata = data.frame(x = xx))
+  
+  # parameters
+  
+  dpr<-diff(pr,1)/diff(xx)
+  
+  # TL @ inflection point 
+  TLinfl <- xx[which.max(dpr)-1]
+  # maximum steepness
+  Steepness <- max(dpr)
+  # Biomass @ inflection
+  BIOinfl<- predict(r, newdata=data.frame(x = TLinfl)) 
+  # Lower asymptote
+  LowA <- predict(r, newdata=data.frame(x=1))
+
+  
+  
+  
+  results <- list(
+  	curve = data.frame(x = xx, y = pr),
+  	parameters = 	data.frame(LowA = LowA, Steepness = Steepness, TLinfl = TLinfl, BIOinfl = BIOinfl) 
+  )
+  	
+  return(results)
+  
+  
+}
+
+```
+
+We use the function on the small example
+
+```{r}
+out_ex <- mycurve(ex$fTLr, ex$ycurv)
+```
+
+And see how the curve looks like
+
+```{r}
+ex_plot <- ex_plot +
+	geom_line(data = out_ex$curve, aes(x = x, y = y), size = 1.1, alpha = 0.6)
+
+print(ex_plot)
+```
+
+We can also visualize the extracted parameters
+
+```{r}
+
+intercept <- out_ex$parameters$BIOinfl - out_ex$parameters$Steepness * out_ex$parameters$TLinfl
+
+ex_plot <- ex_plot  +
+	geom_abline(aes(intercept = intercept, slope = out_ex$parameters$Steepness), colour = "blue", lty = 2, alpha = 0.8) +
+	geom_segment(data = out_ex$parameters, aes(x = TLinfl, y = BIOinfl,
+									 xend = min(out_ex$curve$x), yend = BIOinfl), size = 0.8, lty = 1, alpha = 0.8, colour = "green", arrow=arrow()) +
+	geom_segment(data = out_ex$parameters, aes(x = TLinfl, y = BIOinfl,
+									 xend = TLinfl, yend = 0), size = 0.8, lty = 1, alpha = 0.8, colour = "green", arrow=arrow()) +
+	geom_point(data = out_ex$parameters, aes(x = TLinfl, y = BIOinfl), colour = "red", size = 1.6) 
+
+print(ex_plot)
+```
+
+the function can be used also on the time series
+
+```{r message = F}
+
+out_pars <- cumbio |> 
+	group_by(area_name, year) |> 
+	summarise(LowA = mycurve(fTLr, ycurv)$parameters$LowA,
+						Steepness = mycurve(fTLr, ycurv)$parameters$Steepness,
+						TLinfl = mycurve(fTLr, ycurv)$parameters$TLinfl,
+						BIOinfl = mycurve(fTLr, ycurv)$parameters$BIOinfl)
+```
+
+long data frame for plotting the parameters time series
+
+```{r}
+longdata <- out_pars |> 
+  tidyr::gather(variable, value, c(LowA, Steepness, TLinfl, BIOinfl)) %>% 
+  group_by(area_name, year) %>% 
+  #summarise(mean_value = mean(value)) %>% 
+  ungroup()
+
+ggplot(longdata, aes(year, value)) +
+	geom_point(alpha = 0.7) +
+	geom_line(alpha = 0.7) +
+	facet_grid(variable ~ area_name, scale = "free_y") +
+	theme_few() +
+	ylab("Parameter value")
 ```
