@@ -1,6 +1,6 @@
 ---
 title: "Cumulative Biomass example"
-author: "Matteo Zucchetta"
+author: "MZ https://github.com/matzuc"
 format: html
 execute:
   message: false
