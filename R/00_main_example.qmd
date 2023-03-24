@@ -1,7 +1,9 @@
 ---
 title: "Cumulative Biomass example"
 author: "MZ https://github.com/matzuc"
-format: html
+format:
+  html:
+    embed-resources: true
 execute:
   message: false
 ---
