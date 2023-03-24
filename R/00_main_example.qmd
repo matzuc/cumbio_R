@@ -1,0 +1,99 @@
+---
+title: "Cumulative Biomass example"
+author: "Matteo Zucchetta"
+format: html
+---
+
+## Dependancies
+
+loading required packages for running the example. For fitting the curves and estimating the parameters, only the `drc` package is needed.
+
+```{r warning=F, message=F}
+library(drc)
+library(dplyr) # data handling
+library(tidyr) # data handling
+library(ggplot2) # plotting
+library(ggthemes) # plotting
+library(here) # handling paths
+library(rfishbase) #for retrieving TLs from fishbase
+```
+
+## Loading the dataset
+
+We use reconstructed catches from Sea Around Us (<https://www.seaaroundus.org/>) for the EEZs of Italy downloaded in March 24^th^ 2023.
+
+```{r}
+db <- read.csv(here('data/SAU EEZ 380,901,902 v50-0.csv'), sep = ",", dec = ".")
+
+
+```
+
+## Data handling
+
+Normally you can use multiple local and specific sources to obtains trophic levels (TLs) for the species, but in this example we use the TLs from [fishbase](www.fishbase.org), retrieved with the `rfishbase` package.
+
+First we extract the list of species in the dataset.
+
+```{r message=F}
+splist <- db |> group_by(scientific_name, common_name) |> summarise()
+```
+
+We use the function `ecology` from `rfishbase` to extract the TL
+
+```{r message=F}
+fb <- ecology(splist$scientific_name,
+        fields=c("Species", "FoodTroph", "FoodSeTroph")) |> rename(scientific_name = Species)
+
+
+
+```
+
+Check for duplicates in retrived TLs
+
+```{r}
+fb %>% group_by(scientific_name) %>% filter(n() > 1)
+```
+
+We can remove the onw without TL information
+
+```{r}
+fb <- fb |> filter(!((scientific_name == "Sprattus sprattus") & is.na(FoodTroph)))
+```
+
+We obtain TLs for `r length(which(is.na(fb$FoodTroph)))` species out of `r nrow(splist)` taxa in the dataset. We will remove the taxa without TL for this examples, but this operation should be carefully evaluated in a real-world analysis.
+
+We attach the TLs to the catches dataset and remove record without TL
+
+```{r}
+db <-  left_join(db, fb)
+dat <- db |> filter(!is.na(FoodTroph ))
+```
+
+### Cumulating biomass
+
+We group the TLs in TL classes, choosing a 0.1 step, and cumulating the biomass for each TL class, groupting for EEZ and year
+
+```{r}
+# TL step
+step <- 0.1
+
+#TL range
+my.lim <- seq(1-step, 5.4 +step,by=step)
+
+#TL labels (midpoint of the class)
+my.lab <- my.lim + step/2
+
+
+# factor 
+dat$fTL <- cut(dat$FoodTroph , my.lim, labels=my.lab[-length(my.lim)])
+
+# numeric label for the TL class
+dat$fTLr <- as.numeric(levels(dat$fTL)[dat$fTL])
+
+```
+
+Cumulated biomass for TL class
+
+```{r}
+
+```
