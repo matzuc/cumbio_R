@@ -6,6 +6,8 @@ execute:
   message: false
 ---
 
+This notebook is available at <https://github.com/matzuc>
+
 ## Dependancies
 
 loading required packages for running the example. For fitting the curves and estimating the parameters, only the `drc` package is needed.
@@ -256,14 +258,7 @@ ggplot(longdata, aes(year, value)) +
 
 We can also extract all the fitted curves and plot them
 
-```{r}
-db_curves <- cumbio |> 
-	group_by(area_name, year) |> 
-  group_modify(~ mutate(.x, x = mycurve(fTLr, ycurv)$curve$x))
-
-library(purrr)
-
-
+```{r warning = F}
 b_curves <- cumbio  %>%
   # Group the data by area_name and year
   group_by(area_name, year) %>%
