@@ -2,6 +2,8 @@
 title: "Cumulative Biomass example"
 author: "Matteo Zucchetta"
 format: html
+execute:
+  message: false
 ---
 
 ## Dependancies
@@ -12,6 +14,7 @@ loading required packages for running the example. For fitting the curves and es
 library(drc)
 library(dplyr) # data handling
 library(tidyr) # data handling
+library(purrr) # data handling
 library(ggplot2) # plotting
 library(ggthemes) # plotting
 library(viridis) # plotting
@@ -126,7 +129,7 @@ ggplot(cumbio, aes(fTLr, ycurv, colour = year, group = (year))) +
 or just focus on one curve:
 
 ```{r}
-ex <- cumbio |> filter(area_name == "Italy (mainland)", year == 1980)
+ex <- cumbio |> filter(area_name == "Sicily (Italy)", year == 2015)
 
 ex_plot <- ggplot(ex, aes(fTLr, ycurv)) +
 	geom_point(alpha = 0.5, size = 0.6) + 
@@ -148,7 +151,7 @@ We can define a function to fit the model (fixing the upper asymptote to 1), and
 
 ```{r}
 
-mycurve <- function(x, y){
+mycurve <- function(x, y, npoints = 10000){
 	
 	# fit the model
   r <- drm(y ~ x, fct = baro5(fixed = c(NA, NA, NA, 1, NA)))
@@ -157,8 +160,8 @@ mycurve <- function(x, y){
   
   # xx are the TLs
   xx <- NA;
-  xx <- seq(1.6, 5,length.out=10000)
-  pr <- NA; length(pr) <- 10000# vector for prediction
+  xx <- seq(1.6, 5,length.out = npoints)
+  pr <- NA; length(pr) <- npoints# vector for prediction
   pr <- predict(r, newdata = data.frame(x = xx))
   
   # parameters
@@ -199,7 +202,8 @@ And see how the curve looks like
 
 ```{r}
 ex_plot <- ex_plot +
-	geom_line(data = out_ex$curve, aes(x = x, y = y), size = 1.1, alpha = 0.6)
+	geom_line(data = out_ex$curve, aes(x = x, y = y), size = 1.1, alpha = 0.6) +
+	ggtitle("Fitted curve")
 
 print(ex_plot)
 ```
@@ -223,7 +227,7 @@ print(ex_plot)
 
 the function can be used also on the time series
 
-```{r message = F}
+```{r warning=F}
 
 out_pars <- cumbio |> 
 	group_by(area_name, year) |> 
@@ -233,7 +237,7 @@ out_pars <- cumbio |>
 						BIOinfl = mycurve(fTLr, ycurv)$parameters$BIOinfl)
 ```
 
-long data frame for plotting the parameters time series
+We can plot the time series of the parameters
 
 ```{r}
 longdata <- out_pars |> 
@@ -248,4 +252,50 @@ ggplot(longdata, aes(year, value)) +
 	facet_grid(variable ~ area_name, scale = "free_y") +
 	theme_few() +
 	ylab("Parameter value")
+```
+
+We can also extract all the fitted curves and plot them
+
+```{r}
+db_curves <- cumbio |> 
+	group_by(area_name, year) |> 
+  group_modify(~ mutate(.x, x = mycurve(fTLr, ycurv)$curve$x))
+
+library(purrr)
+
+
+b_curves <- cumbio  %>%
+  # Group the data by area_name and year
+  group_by(area_name, year) %>%
+  # Split the data into a list of data frames based on the grouping
+  group_split() %>%
+  # Apply the mycurve function to each data frame in the list
+  map(function(df) {
+    # Apply the function using fTLr as x and ycurv as y
+    res <- mycurve(df$fTLr, df$ycurv, npoints = 100)
+    
+    # Extract the curve data frame
+    curve <- res$curve
+    
+    # Add area_name and year columns to the curve data frame
+    curve$area_name <- unique(df$area_name)
+    curve$year <- unique(df$year)
+    
+    # Return the curve data frame
+    curve
+  }) %>%
+  # Combine the curve data frames from each list element
+  bind_rows()
+
+
+ggplot(b_curves, aes(x, y, colour = year, group = (year))) +
+	geom_line(alpha = 0.5) +
+	facet_grid(.~ area_name) +
+	scale_color_viridis_c(option = "magma") +
+	theme_few() +
+	xlab("TL") +
+	ylab("Relative Cumulative Biomass") +
+	ggtitle("Fitted cumulative biomass curves") +
+	geom_point(data = out_pars, aes(x = TLinfl, y =  BIOinfl), alpha = 0.4, size = 0.7)
+
 ```
