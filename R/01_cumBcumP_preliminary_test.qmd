@@ -12,7 +12,7 @@ This notebook is available at <https://github.com/matzuc>
 
 ## Dependancies
 
-loading required packages for running the example. For fitting the curves and estimating the parameters, only the `drc` package is needed.
+loading required packages for running the example. For fitting the curves and estimating the parameters,  the `drc` package is needed.
 
 ```{r warning=F, message=F}
 library(drc)
@@ -23,6 +23,8 @@ library(ggplot2) # plotting
 library(ggthemes) # plotting
 library(viridis) # plotting
 library(here) # handling paths
+library(patchwork)
+library(ggrepel)
 
 ```
 
@@ -53,13 +55,19 @@ liste_mod #contains a list and decription of available models in EcoBase
 
 ## Data handling
 
-I extract the mode **112** for the North Atlantic (1994)
+pick up one model
+
+```{r}
+mymodel <- 704
+
+```
+
+
+I extract the model `r mymodel` for the `r liste_mod$model.model_name[which(liste_mod$model.model_number == mymodel)]`
 
 ```{r message=F}
-
 #To Obtain a model - output
 h=basicTextGatherer()
-mymodel<-736
 
 curlPerform(url = paste('http://sirs.agrocampus-ouest.fr/EcoBase/php/webser/soap-client_output.php?no_model=',mymodel,sep=''),writefunction=h$update,verbose=TRUE)
 
@@ -76,13 +84,7 @@ arrange the dataset
 dat <- t(output1) |> as.data.frame()
 ```
 
-
-
-Check for duplicates
-
 ### Cumulating biomass
-
-We group the TLs in TL classes, choosing a 0.1 step, and cumulating the biomass for each TL class, groupting for EEZ and year
 
 Cumulated biomass for TL (no TL class, here)
 
@@ -92,19 +94,19 @@ cumbio <- dat |>
 	mutate(p = as.numeric(biomass) * as.numeric(pb),
 				 tl = as.numeric(tl)) |>
 	arrange(tl) |> # order by TL
-	filter(tl > 2) |>
+	filter(tl > 2) |> # to focus on metazoan
 	mutate(ycum = cumsum(as.numeric(biomass)), pcum = cumsum(p)) |> # cumulative biomass
 	mutate(ycurv = ycum / max(ycum), pcurv = pcum/max(pcum)) #relative cumulative biomass
 	
 
 ```
 
-We can plot all the curves 
+We can plot all the curves
 
 ```{r}
 ggplot(cumbio, aes(tl, ycurv)) +
-	geom_point(alpha = 0.5, size = 0.6) + 
-	geom_line(alpha = 0.5) +
+	geom_point(alpha = 0.5, size = 0.8) + 
+	geom_line(alpha = 0.6) +
 	theme_few() +
 	xlab("TL") +
 	ylab("Relative Cumulative Biomass") +
@@ -112,12 +114,10 @@ ggplot(cumbio, aes(tl, ycurv)) +
 
 ```
 
-
-
 ```{r}
 ggplot(cumbio, aes(ycurv, pcurv)) +
-	geom_point(alpha = 0.5, size = 0.6) + 
-	geom_line(alpha = 0.5) +
+	geom_point(alpha = 0.5, size = 0.8) + 
+	geom_line(alpha = 0.56) +
 	theme_few() +
 	ylab("Relative Cumulative Production") +
 	xlab("Relative Cumulative Biomass") +
@@ -125,87 +125,223 @@ ggplot(cumbio, aes(ycurv, pcurv)) +
 
 ```
 
-
-
-
 # fit the curve
+
+load the segmented
 
 ```{r}
 library(segmented)
-library(nlme)
-data(Cefamandole)
-Cefamandole$lTime <-log(Cefamandole$Time)
-Cefamandole$lconc <-log(Cefamandole$conc)
-plot(Cefamandole$lTime, Cefamandole$lconc)
 
-o<-lm(lconc ~ lTime, data=Cefamandole)
-os<-segmented.lm(o, ~lTime, #random=list(Subject=pdDiag(~1+lTime+U+G0)),
-control=seg.control(n.boot=0, display=TRUE))
-slope(os)
-plot(os)
-os
-o
 ```
 
 ```{r}
+# linear model
+
 oo <- lm(pcurv ~ ycurv, data=cumbio)
-ooss <- segmented.lm(oo, ~ ycurv, data=cumbio,
-control=seg.control(n.boot=0, display=TRUE))
-ooss
-
-plot(ooss)
-
-
-
-```
-
-
-grafico
-
-```{r}
-pr <-data.frame(ycurv = cumbio$ycurv, p = predict(ooss))
-
 
 ggplot(cumbio, aes(ycurv, pcurv)) +
-	geom_point(alpha = 0.5, size = 0.6) + 
-	geom_line(alpha = 0.5) +
+	geom_point(alpha = 0.5, size = 0.8) + 
+	geom_line(alpha = 0.56) +
 	theme_few() +
 	ylab("Relative Cumulative Production") +
 	xlab("Relative Cumulative Biomass") +
 	ggtitle("cumB/cumP") +
-	geom_line(data = pr, aes(y = p), col = "red", lty = 2)
+	geom_abline(slope = coef(oo)[2], intercept = coef(oo)[1], lty = 2)
 
-pr
+```
+
+```{r}
+
+
+seg <- segmented.lm(oo, ~ ycurv, data=cumbio,
+										, npsi = 1)
+seg
+
+```
+
+grafico
+
+```{r}
+
+	pr <- data.frame(ycurv = seq(min(cumbio$ycurv), 1, length.out = 1000))
+
+pr$p = predict(seg, newdata = pr, type = "response")
+pr$se = predict(seg, newdata = pr, type = "response", se.fit = T)$se.fit
+
+point <- data.frame(ycurv = summary(seg)$psi[2],
+										xse = summary(seg)$psi[3])
+
+
+arcdata <- data.frame(ycurv = c(point$ycurv - 0.1, 
+																point$ycurv + 0.1))
+arcdata$p <- predict(seg, newdata = arcdata, type = "response")
+
+
+point$p <- predict(seg, newdata = point, type = "response")
+point$pse <- predict(seg, newdata = point, type = "response", se.fit = T)$se.fit
+
+
+aa <- summary(seg)
+aa$coefficients[4, 2]
+ggplot(pr, aes(ycurv, p)) +
+	#geom_point() +
+	geom_line()
 ```
 
 
+explore TLs:
+
+
+```{r}
+
+# Value for which we want to find the closest values
+target <- 11
+
+# Find the index of the lower closest value
+lower_index <- max(which(cumbio$ycurv <= summary(seg)$psi[2]))
+
+# Find the index of the upper closest value
+upper_index <- min(which(cumbio$ycurv >= summary(seg)$psi[2]))
+
+TLs <- cumbio[c(lower_index, upper_index), c("tl", "pcurv", "ycurv")]
+TLs$label <- paste0("TL=", round(TLs$tl, 2))
+
+
+```
+
+compute the angle:
+
+
+```{r}
+slope1 <- seg$coefficients[2]
+slope2 <- slope1 + seg$coefficients[3]
+
+# Compute the angle between the two lines
+angle <- 180 - atan(abs((slope1 - slope2) / (1 + slope1 * slope2))) * (180 / pi)
+
+angle 
+```
+
+
+
+
+```{r}
+
+ggplot(cumbio, aes(ycurv, pcurv)) +
+	geom_point(alpha = 0.5, size = 0.8) + 
+	geom_point(data = TLs, alpha = 0.7, size = 1.2) + 
+	geom_line(alpha = 0.5) +
+	theme_few() +
+	ylab("Relative Cumulative Production") +
+ xlab("Relative Cumulative Biomass") +
+	ggtitle("cumB/cumP") +
+	geom_line(data = pr, aes(x = ycurv, y = p), col = "red", lty = 1) +
+	geom_ribbon(data = pr, aes(y = p, ymin = p-se, ymax = p + se), alpha = 0.3) +
+	geom_point(data = point, aes(x = ycurv, y = p), col = "red", size = 2.5) +
+	geom_errorbar(data = point, aes(x = ycurv, y = p, ymin = p - pse, ymax = p + pse), col = "red", width = 0.01,  alpha = 0.3) +
+	geom_errorbarh(data = point, aes(x = ycurv, y = p, xmin = ycurv - xse, xmax = ycurv + xse), col = "red", height = 0.01,  alpha = 0.3)+geom_abline( intercept =  -0.08, slope = slope1) +
+	geom_abline( intercept = 0.7, slope = slope2) +
+	coord_equal() 
+
+
+```
+
+
+```{r}
+
+ggplot(cumbio, aes(ycurv, pcurv)) +
+	geom_point(alpha = 0.5, size = 0.8) + 
+	geom_point(data = TLs, alpha = 0.7, size = 1.2) + 
+	geom_line(alpha = 0.5) +
+	theme_few() +
+	ylab("Relative Cumulative Production") +
+ xlab("Relative Cumulative Biomass") +
+	ggtitle("cumB/cumP") +
+	geom_line(data = pr, aes(x = ycurv, y = p), col = "red", lty = 1) +
+	geom_ribbon(data = pr, aes(y = p, ymin = p-se, ymax = p + se), alpha = 0.3) +
+	geom_point(data = point, aes(x = ycurv, y = p), col = "red", size = 2.5) +
+	geom_errorbar(data = point, aes(x = ycurv, y = p, ymin = p - pse, ymax = p + pse), col = "red", width = 0.01,  alpha = 0.3) +
+	geom_errorbarh(data = point, aes(x = ycurv, y = p, xmin = ycurv - xse, xmax = ycurv + xse), col = "red", height = 0.01,  alpha = 0.3) +
+	
+  geom_curve(data = arcdata, aes(x = ycurv[1], y = p[1], xend = ycurv[2], yend = p[2]), curvature = 0.5, color = "red", size = 1.5, alpha = 0.7) +
+	geom_text_repel(data = TLs, aes(x = ycurv, y = pcurv, label = label), 
+									min.segment.length = 0,
+									direction = "both", size =4, max.overlaps = 1, force = 3, force_pull = 0,
+									nudge_x = c(-0.05, 0.1), nudge_y = 0.12)
+
+
+ggsave(here::here('out', '01_cumBcumP_test.png'), height = 3.8, width = 5, dpi = 400)
+
+
+```
+
+
+
+
+```{r}
+
+
+
+A <- ggplot(cumbio, aes(ycurv, pcurv)) +
+	geom_point(alpha = 0.5, size = 0.8) + 
+	
+	geom_line(alpha = 0.5) +
+	theme_few() +
+	ylab("Relative Cumulative Production") +
+#	xlab("Relative Cumulative Biomass") +
+	ggtitle("cumB/cumP & flipped cumB/TL") +
+	geom_line(data = pr, aes(x = ycurv, y = p), col = "red", lty = 1) +
+	geom_ribbon(data = pr, aes(y = p, ymin = p-se, ymax = p + se), alpha = 0.3) +
+	geom_point(data = point, aes(x = ycurv, y = p), col = "red", size = 2.5) +
+	geom_errorbar(data = point, aes(x = ycurv, y = p, ymin = p - pse, ymax = p + pse), col = "red", width = 0.01,  alpha = 0.3) +
+	geom_errorbarh(data = point, aes(x = ycurv, y = p, xmin = ycurv - xse, xmax = ycurv + xse), col = "red", height = 0.01, alpha = 0.3) +
+	 
+  theme(axis.title.x = element_blank(),
+        axis.text.x = element_blank(),
+        axis.ticks.x = element_blank()) +
+	
+	geom_vline(xintercept = point$ycurv, colour = "red", lty = 2, alpha = 0.3)+
+	geom_vline(xintercept = point$ycurv - point$xse, colour = "red", lty = 3, alpha = 0.3)+
+	geom_vline(xintercept = point$ycurv +  point$xse, colour = "red", lty = 3, alpha = 0.3) +
+	
+	coord_cartesian(xlim = c(0, 1))
+	
+
+
+A
+```
 
 or just focus on one curve:
 
 ```{r}
-ex <- cumbio |> filter(area_name == "Sicily (Italy)", year == 2015)
-
-ex_plot <- ggplot(ex, aes(fTLr, ycurv)) +
-	geom_point(alpha = 0.5, size = 0.6) + 
-	geom_line(alpha = 0.5, lty = 3) +
-	facet_grid(.~ area_name) +
+B <- ggplot(cumbio, aes(ycurv, tl)) +
+	geom_point(alpha = 0.5, size = 0.8) + 
+	geom_line(alpha = 0.5) +
 	theme_few() +
-	xlab("TL") +
-	ylab("Relative Cumulative Biomass") +
-	ggtitle("Observed cumulative biomass curves")
-
-print(ex_plot)
+	ylab("TL") +
+	xlab("Relative Cumulative Biomass") +
+	
+	
+	geom_vline(xintercept = point$ycurv, colour = "red", lty = 2, alpha = 0.3)+
+	geom_vline(xintercept = point$ycurv - point$xse, colour = "red", lty = 3, alpha = 0.3)+
+	geom_vline(xintercept = point$ycurv +  point$xse, colour = "red", lty = 3, alpha = 0.3) +
+	coord_cartesian(xlim = c(0, 1))
 ```
 
-## Fit the curves and extract the parameters
+## Combine the curves
 
-we can leverage the `baro5` function from the `drc` package to fit the baroreflex 5-parameter function to the TL/ relative cumulative biomass relationship
+```{r}
+A/B
+```
 
-We can define a function to fit the model (fixing the upper asymptote to 1), and extract some parameters to summarize the characteristics of the curve
+function for the S curve
 
 ```{r}
 
-mycurve <- function(x, y, npoints = 10000){
+
+
+
+mycurve <- function(x, y, npoints = 5000){
 	
 	# fit the model
   r <- drm(y ~ x, fct = baro5(fixed = c(NA, NA, NA, 1, NA)))
@@ -217,7 +353,7 @@ mycurve <- function(x, y, npoints = 10000){
   xx <- seq(1.6, 5,length.out = npoints)
   pr <- NA; length(pr) <- npoints# vector for prediction
   pr <- predict(r, newdata = data.frame(x = xx))
-  
+
   # parameters
   
   dpr<-diff(pr,1)/diff(xx)
@@ -249,100 +385,69 @@ mycurve <- function(x, y, npoints = 10000){
 We use the function on the small example
 
 ```{r}
-out_ex <- mycurve(ex$fTLr, ex$ycurv)
+out_ex <- mycurve(cumbio$tl, cumbio$ycurv)
 ```
 
 And see how the curve looks like
 
 ```{r}
-ex_plot <- ex_plot +
-	geom_line(data = out_ex$curve, aes(x = x, y = y), size = 1.1, alpha = 0.6) +
-	ggtitle("Fitted curve")
 
-print(ex_plot)
-```
-
-We can also visualize the extracted parameters
-
-```{r}
 
 intercept <- out_ex$parameters$BIOinfl - out_ex$parameters$Steepness * out_ex$parameters$TLinfl
 
-ex_plot <- ex_plot  +
+
+ggplot(cumbio, aes(tl, ycurv)) +
+	geom_point(alpha = 0.5, size = 0.8) + 
+	geom_line(alpha = 0.5) +
+	theme_few() +
+	xlab("TL") +
+	ylab("Relative Cumulative Biomass") +
+	
+	geom_line(data = out_ex$curve, aes(x = x, y = y), size = 1.1, alpha = 0.6) +
+	ggtitle("Fitted curve") +
 	geom_abline(aes(intercept = intercept, slope = out_ex$parameters$Steepness), colour = "blue", lty = 2, alpha = 0.8) +
 	geom_segment(data = out_ex$parameters, aes(x = TLinfl, y = BIOinfl,
 									 xend = min(out_ex$curve$x), yend = BIOinfl), size = 0.8, lty = 1, alpha = 0.8, colour = "green", arrow=arrow()) +
 	geom_segment(data = out_ex$parameters, aes(x = TLinfl, y = BIOinfl,
 									 xend = TLinfl, yend = 0), size = 0.8, lty = 1, alpha = 0.8, colour = "green", arrow=arrow()) +
-	geom_point(data = out_ex$parameters, aes(x = TLinfl, y = BIOinfl), colour = "red", size = 1.6) 
+	geom_point(data = out_ex$parameters, aes(x = TLinfl, y = BIOinfl), colour = "red", size = 1.6) +
+	geom_hline(yintercept = point$ycurv, colour = "red", lty = 2)+
+	geom_hline(yintercept = point$ycurv - point$xse, colour = "red", lty = 3)+
+	geom_hline(yintercept = point$ycurv +  point$xse, colour = "red", lty = 3)
 
-print(ex_plot)
+
+ggsave(here::here('out', '01_cumBcumP_cumB_Scurve.png'), height = 3.8, width = 5, dpi = 400)
+
+
+
 ```
 
-the function can be used also on the time series
-
-```{r warning=F}
-
-out_pars <- cumbio |> 
-	group_by(area_name, year) |> 
-	summarise(LowA = mycurve(fTLr, ycurv)$parameters$LowA,
-						Steepness = mycurve(fTLr, ycurv)$parameters$Steepness,
-						TLinfl = mycurve(fTLr, ycurv)$parameters$TLinfl,
-						BIOinfl = mycurve(fTLr, ycurv)$parameters$BIOinfl)
-```
-
-We can plot the time series of the parameters
+swap x & y
 
 ```{r}
-longdata <- out_pars |> 
-  tidyr::gather(variable, value, c(LowA, Steepness, TLinfl, BIOinfl)) %>% 
-  group_by(area_name, year) %>% 
-  #summarise(mean_value = mean(value)) %>% 
-  ungroup()
 
-ggplot(longdata, aes(year, value)) +
-	geom_point(alpha = 0.7) +
-	geom_line(alpha = 0.7) +
-	facet_grid(variable ~ area_name, scale = "free_y") +
+B <- ggplot(cumbio, aes(ycurv, tl)) +
+	geom_point(alpha = 0.5, size = 0.8) + 
+	geom_line(alpha = 0.5) +
 	theme_few() +
-	ylab("Parameter value")
+	ylab("TL") +
+	xlab("Relative Cumulative Biomass") +
+	geom_line(data = out_ex$curve, aes(x = y, y = x), size = 1.1, alpha = 0.6) +
+	geom_point(data = out_ex$parameters, aes(y = TLinfl, x = BIOinfl), colour = "green", size = 3) +
+	coord_cartesian(xlim = c(0, 1)) +
+	geom_vline(xintercept = point$ycurv, colour = "red", lty = 2, alpha = 0.3)+
+	geom_vline(xintercept = point$ycurv - point$xse, colour = "red", lty = 3, alpha = 0.3)+
+	geom_vline(xintercept = point$ycurv +  point$xse, colour = "red", lty = 3, alpha = 0.3)
+	
+
+
+B
 ```
 
-We can also extract all the fitted curves and plot them
+combine the plots
 
-```{r warning = F}
-b_curves <- cumbio  %>%
-  # Group the data by area_name and year
-  group_by(area_name, year) %>%
-  # Split the data into a list of data frames based on the grouping
-  group_split() %>%
-  # Apply the mycurve function to each data frame in the list
-  map(function(df) {
-    # Apply the function using fTLr as x and ycurv as y
-    res <- mycurve(df$fTLr, df$ycurv, npoints = 100)
-    
-    # Extract the curve data frame
-    curve <- res$curve
-    
-    # Add area_name and year columns to the curve data frame
-    curve$area_name <- unique(df$area_name)
-    curve$year <- unique(df$year)
-    
-    # Return the curve data frame
-    curve
-  }) %>%
-  # Combine the curve data frames from each list element
-  bind_rows()
+```{r}
+A/B
 
-
-ggplot(b_curves, aes(x, y, colour = year, group = (year))) +
-	geom_line(alpha = 0.5) +
-	facet_grid(.~ area_name) +
-	scale_color_viridis_c(option = "magma") +
-	theme_few() +
-	xlab("TL") +
-	ylab("Relative Cumulative Biomass") +
-	ggtitle("Fitted cumulative biomass curves") +
-	geom_point(data = out_pars, aes(x = TLinfl, y =  BIOinfl), alpha = 0.4, size = 0.7)
-
+ggsave(here::here('out', '01_cumBcumP_test_combined.png'), height = 6, width = 5, dpi = 400)
 ```

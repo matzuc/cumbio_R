@@ -1,0 +1,498 @@
+---
+title: Cumulative Biomass / Production
+author: MZ https://github.com/matzuc
+format:
+  html:
+    embed-resources: true
+execute:
+  message: false
+---
+
+This notebook is available at <https://github.com/matzuc>
+
+## Dependancies
+
+loading required packages for running the example. For fitting the curves and estimating the parameters,  the `drc` package is needed.
+
+```{r warning=F, message=F}
+library(drc)
+library(dplyr) # data handling
+library(tidyr) # data handling
+library(purrr) # data handling
+library(ggplot2) # plotting
+library(ggthemes) # plotting
+library(viridis) # plotting
+library(here) # handling paths
+library(patchwork)
+library(ggrepel)
+library(segmented)
+```
+
+## Loading the dataset
+
+We use the procedure from [ecobase.ecopath.org](http://ecobase.ecopath.org/#docs http://ecobase.ecopath.org/#docs) to read an *Ecopath* model
+
+```{r warning=F}
+library(RCurl)
+library(XML)
+library(plyr)
+
+```
+
+get the list of models
+
+```{r}
+
+#To obtain the list of available model
+h=basicTextGatherer()
+curlPerform(url = 'http://sirs.agrocampus-ouest.fr/EcoBase/php/webser/soap-client_3.php',writefunction=h$update)
+
+data<-xmlTreeParse(h$value(),useInternalNodes=TRUE)
+liste_mod<-ldply(xmlToList(data),data.frame)%>% filter(model.dissemination_allow =='true')
+        
+liste_mod #contains a list and decription of available models in EcoBase  
+```
+
+## Data handling
+
+
+
+cycle
+
+```{r}
+out <- data.frame(
+  group_name = character(),
+  group_seq = numeric(),
+  tl = numeric(),
+  biomass = numeric(),
+  ee = numeric(),
+  pb = numeric(),
+  qb = numeric(),
+  other_mort = numeric(),
+  model.model_number = numeric(),
+  id = numeric(),
+  model.model_name = character(),
+  model.country = character(),
+  model.area = character(),
+  model.geographic_extent = character(),
+  model.ecosystem_type = character(),
+  model.currency_units = character(),
+  model.currency_units_custom = character(),
+  model.description = character(),
+  model.num_group = numeric(),
+  model.num_digits = numeric(),
+  model.model_year = numeric(),
+  model.model_period = character(),
+  model.author = character(),
+  model.contact = character(),
+  model.url = character(),
+  model.doi = character(),
+  model.temperature_mean = numeric(),
+  model.temperature_min = numeric(),
+  model.temperature_max = numeric(),
+  model.depth_mean = numeric(),
+  model.depth_min = numeric(),
+  model.depth_max = numeric(),
+  model.reference = character(),
+  model.is_fitted = logical(),
+  model.ecosim = logical(),
+  model.ecospace = logical(),
+  model.whole_food_web = logical(),
+  model.fisheries = logical(),
+  model.aquaculture = logical(),
+  model.environment_variability = logical(),
+  model.ecosyst_functioning = logical(),
+  model.pollution = logical(),
+  model.other_impact_assessment = logical(),
+  model.dissemination_allow = logical(),
+  model.region = character(),
+  model.lme = numeric(),
+  model.comments_objectives = character(),
+  model.comments_objectives.1 = character(),
+  model.modification_child = logical(),
+  stringsAsFactors = FALSE
+)
+
+for(i in 1:20){
+	
+	met <- liste_mod[i, ]
+	mymodel <- met$model.model_number
+
+	
+	h=basicTextGatherer()
+
+  curlPerform(url = paste('http://sirs.agrocampus-ouest.fr/EcoBase/php/webser/soap-client_output.php?no_model=',mymodel,sep=''),writefunction=h$update,verbose=TRUE)
+
+
+  data<-xmlTreeParse(h$value(),useInternalNodes=TRUE)
+
+  output1<-xpathSApply(data,'//group',function(x) xmlToList(x))
+    
+  dat <- t(output1)  |> as.data.frame() |> 
+  	mutate(tl = as.numeric(tl),
+  				 biomass = as.numeric(biomass),
+  				 pb = as.numeric(pb), 
+  				 model.model_number = mymodel) |>
+  	left_join(met)
+  
+  
+  out <- rbind(out, dat)
+  
+	rm(mymodel)
+
+	rm(data)
+	rm(output1)
+	rm(dat)
+	print(i)
+}
+
+```
+
+
+
+
+compute cumB
+
+
+
+```{r}
+
+cumbio <- out |>
+	group_by(model.model_number, model.model_name) |>
+	arrange(tl) |> filter(tl > 2) |>
+	mutate(p = biomass * pb) |>
+	mutate(ycum = cumsum(as.numeric(biomass)), pcum = cumsum(p)) |> # cumulative biomass
+	mutate(ycurv = ycum / max(ycum), pcurv = pcum/max(pcum)) #relative cumulative biomass
+
+
+
+
+```
+
+
+test on the first 10 rows
+
+```{r}
+ggplot(cumbio, aes(ycurv, pcurv)) +
+	geom_point() +
+	geom_line() +
+	facet_wrap(~ model.model_name)
+```
+
+
+```{r}
+ggplot(cumbio, aes(tl, ycurv)) +
+	geom_point() +
+	geom_line() +
+	facet_wrap(~ model.model_name)
+```
+
+
+## fitting function
+
+```{r}
+
+
+mycurve <- function(x, y, z, npoints = 5000){
+	
+	# fit the model
+  r <- drm(y ~ x, fct = baro5(fixed = c(NA, NA, NA, 1, NA)))
+
+  # use the fitted curve to predict the expected values (these are used fot plotting and estimating the parameters)
+  
+  # xx are the TLs
+  xx <- NA;
+  xx <- seq(1.6, 5,length.out = npoints)
+  pr <- NA; length(pr) <- npoints# vector for prediction
+  pr <- predict(r, newdata = data.frame(x = xx))
+
+  # parameters
+  
+  dpr<-diff(pr,1)/diff(xx)
+  
+  # TL @ inflection point 
+  TLinfl <- xx[which.max(dpr)-1]
+  # maximum steepness
+  Steepness <- max(dpr)
+  # Biomass @ inflection
+  BIOinfl<- predict(r, newdata=data.frame(x = TLinfl)) 
+  # Lower asymptote
+  LowA <- predict(r, newdata=data.frame(x=1))
+
+  
+  
+  # hokeystick
+  LM <- lm(z ~ y)
+  seg <- segmented.lm(LM, ~ y, 
+										, npsi = 1)
+  
+  bpX <- summary(seg)$psi[2]
+  bpY <- predict(seg, newdata = data.frame(y = bpX), type = "response")
+  
+  slope1 <- seg$coefficients[2]
+  slope2 <- slope1 + seg$coefficients[3]
+  
+  # Compute the angle between the two lines
+  bpAngle <- 180 - atan(abs((slope1 - slope2) / (1 + slope1 * slope2))) * (180 / pi)
+  
+  lower_index <- max(which(y <= summary(seg)$psi[2]))
+  
+  # Find the index of the upper closest value
+  upper_index <- min(which(y >= summary(seg)$psi[2]))
+  
+  bpTL <- (x[lower_index] + x[upper_index]) /2
+
+
+  
+  
+  
+  
+  results <- 
+  	data.frame(
+  		TLinfl = TLinfl,
+  		Steepness = Steepness,
+  		BIOinfl = BIOinfl,
+  		LowA = LowA,
+  		bpX = bpX,
+  		bpY = bpY,
+  		bpAngle = bpAngle,
+  		bpTL
+  	)
+  	
+  return(results)
+  
+  
+}
+
+```
+
+
+test the function on one model
+
+
+
+```{r}
+ex <- cumbio |> filter(model.model_number == 2)
+
+
+mycurve(ex$tl, ex$ycurv, ex$pcurv)
+
+
+```
+
+
+
+
+test on multiple moels
+
+
+```{r}
+library(data.table)
+dt <- data.table(cumbio)
+
+result <- dt[, mycurve(tl, ycurv, pcurv), by = .(model.model_name, model.model_number)]
+result
+
+```
+
+
+```{r}
+ggplot(result, aes(bpX, bpAngle)) +
+	geom_point()
+
+```
+
+
+
+larger number of models
+
+
+```{r}
+out <- data.frame(
+  group_name = character(),
+  group_seq = numeric(),
+  tl = numeric(),
+  biomass = numeric(),
+  ee = numeric(),
+  pb = numeric(),
+  qb = numeric(),
+  other_mort = numeric(),
+  model.model_number = numeric(),
+  id = numeric(),
+  model.model_name = character(),
+  model.country = character(),
+  model.area = character(),
+  model.geographic_extent = character(),
+  model.ecosystem_type = character(),
+  model.currency_units = character(),
+  model.currency_units_custom = character(),
+  model.description = character(),
+  model.num_group = numeric(),
+  model.num_digits = numeric(),
+  model.model_year = numeric(),
+  model.model_period = character(),
+  model.author = character(),
+  model.contact = character(),
+  model.url = character(),
+  model.doi = character(),
+  model.temperature_mean = numeric(),
+  model.temperature_min = numeric(),
+  model.temperature_max = numeric(),
+  model.depth_mean = numeric(),
+  model.depth_min = numeric(),
+  model.depth_max = numeric(),
+  model.reference = character(),
+  model.is_fitted = logical(),
+  model.ecosim = logical(),
+  model.ecospace = logical(),
+  model.whole_food_web = logical(),
+  model.fisheries = logical(),
+  model.aquaculture = logical(),
+  model.environment_variability = logical(),
+  model.ecosyst_functioning = logical(),
+  model.pollution = logical(),
+  model.other_impact_assessment = logical(),
+  model.dissemination_allow = logical(),
+  model.region = character(),
+  model.lme = numeric(),
+  model.comments_objectives = character(),
+  model.comments_objectives.1 = character(),
+  model.modification_child = logical(),
+  stringsAsFactors = FALSE
+)
+
+for(i in 192:nrow(liste_mod)){
+	
+	met <- liste_mod[i, ]
+	mymodel <- met$model.model_number
+
+	
+	h=basicTextGatherer()
+
+  curlPerform(url = paste('http://sirs.agrocampus-ouest.fr/EcoBase/php/webser/soap-client_output.php?no_model=',mymodel,sep=''),writefunction=h$update,verbose=TRUE)
+
+
+  data<-xmlTreeParse(h$value(),useInternalNodes=TRUE)
+
+  output1<-xpathSApply(data,'//group',function(x) xmlToList(x))
+    
+  dat <- t(output1)  |> as.data.frame() |> 
+  	mutate(tl = as.numeric(tl),
+  				 biomass = as.numeric(biomass),
+  				 pb = as.numeric(pb), 
+  				 model.model_number = mymodel) |>
+  	left_join(met)
+  
+  
+  out <- rbind(out, dat)
+  
+	rm(mymodel)
+
+	rm(data)
+	rm(output1)
+	rm(dat)
+	print(i)
+}
+
+```
+
+
+
+
+compute cumB
+
+
+```{r}
+
+
+cumbio <- out |>
+	group_by(model.model_number, model.model_name) |>
+	arrange(tl) |> filter(tl > 2) |>
+	mutate(p = biomass * pb) |>
+	mutate(ycum = cumsum(as.numeric(biomass)), pcum = cumsum(p)) |> # cumulative biomass
+	mutate(ycurv = ycum / max(ycum), pcurv = pcum/max(pcum)) #relative cumulative biomass
+
+
+
+
+```
+
+check
+
+```{r}
+
+table(cumbio$model.model_number)
+
+filtered_data <- cumbio %>%
+  group_by(model.model_number) %>%
+  filter(n() > 10)
+
+table(filtered_data$model.model_number)
+
+```
+
+
+
+```{r}
+# Get unique groups
+unique_groups <- unique(dt[, .( model.model_number)])
+
+# Loop through each group
+for(i in seq_len(nrow(unique_groups))){
+  # Subset the data for the current group
+  subset_dt <- dt[ model.model_number == unique_groups[i, model.model_number]]
+  
+  # Print the current group
+  print(paste("Processing group: ", 
+             # unique_groups[i, model.model_name], 
+              unique_groups[i, model.model_number]))
+  
+  # Apply the function
+  tryCatch({
+    result <- subset_dt[, mycurve(tl, ycurv, pcurv)]
+  }, error = function(e) {
+    message("Error with group: ", 
+           # unique_groups[i, model.model_name], 
+            unique_groups[i, model.model_number])
+  })
+}
+```
+
+
+
+
+743, 243, 742, 
+
+```{r}
+filtered_data <- filtered_data |> filter(model.model_number != 243,
+																				 model.model_number != 742,
+																				 model.model_number != 743)
+```
+
+
+
+```{r}
+dt <- data.table(filtered_data)
+
+result <- dt[, mycurve(tl, ycurv, pcurv), by = .(model.model_name, model.model_number)]
+result
+
+```
+
+
+```{r}
+ggplot(result, aes(Steepness, BIOinfl - bpX)) +
+	geom_point()
+
+```
+
+
+```{r}
+library(GGally)
+ggpairs(result[,3:10])
+
+```
+
+
+names(result)
+
