@@ -159,7 +159,7 @@ compute cumB
 
 cumbio <- out |>
 	group_by(model.model_number, model.model_name) |>
-	arrange(tl) |> filter(tl > 2) |>
+	arrange(tl) |> filter(tl > 2.5) |>
 	mutate(p = biomass * pb) |>
 	mutate(ycum = cumsum(as.numeric(biomass)), pcum = cumsum(p)) |> # cumulative biomass
 	mutate(ycurv = ycum / max(ycum), pcurv = pcum/max(pcum)) #relative cumulative biomass
@@ -188,12 +188,140 @@ ggplot(cumbio, aes(tl, ycurv)) +
 ```
 
 
+
+
+
+
+```{r}
+table(cumbio$model.model_number)
+es <- cumbio |> filter(model.model_number == 105)
+
+
+x <- es$tl
+y <- es$ycurv
+z <- es$pcurv
+
+```
+
+
 ## fitting function
 
 ```{r}
 
 
-mycurve <- function(x, y, z, npoints = 5000){
+mycurvePLOTS <- function(x, y, z, npoints, suff){
+	
+	# fit the model
+  r <- drm(y ~ x, fct = baro5(fixed = c(NA, NA, NA, 1, NA)))
+
+  # use the fitted curve to predict the expected values (these are used fot plotting and estimating the parameters)
+  
+  # xx are the TLs
+  xx <- NA;
+  xx <- seq(1.6, 6,length.out = npoints)
+  pr <- NA; length(pr) <- npoints# vector for prediction
+  pr <- predict(r, newdata = data.frame(x = xx))
+
+  # parameters
+  
+  dpr<-diff(pr,1)/diff(xx)
+  
+  # TL @ inflection point 
+  TLinfl <- xx[which.max(dpr)-1]
+  # maximum steepness
+  Steepness <- max(dpr)
+  # Biomass @ inflection
+  BIOinfl<- predict(r, newdata=data.frame(x = TLinfl)) 
+  # Lower asymptote
+  LowA <- predict(r, newdata=data.frame(x=1))
+
+  
+  
+  # hokeystick
+  LM <- lm(z ~ y)
+  seg <- segmented.lm(LM, ~ y, 
+										, npsi = 1)
+  
+  bpX <- summary(seg)$psi[2]
+  bpY <- predict(seg, newdata = data.frame(y = bpX), type = "response")
+  
+  segY <- data.frame(y = seq(0, 1,length.out = npoints)) 
+  segY$z <- predict(seg, newdata = segY, type = "response")
+  
+  slope1 <- seg$coefficients[2]
+  slope2 <- slope1 + seg$coefficients[3]
+  
+  # Compute the angle between the two lines
+  bpAngle <- 180 - atan(abs((slope1 - slope2) / (1 + slope1 * slope2))) * (180 / pi)
+  
+  lower_index <- max(which(y <= summary(seg)$psi[2]))
+  
+  # Find the index of the upper closest value
+  upper_index <- min(which(y >= summary(seg)$psi[2]))
+  
+  bpTL <- (x[lower_index] + x[upper_index]) /2
+  
+  
+  df <- data.frame(x, y, z)
+  prS <- data.frame(x = xx, y = pr)
+
+
+  # plotting
+  A <- ggplot(df, aes(x, y)) +
+  	geom_point() +
+  	geom_line(lty = 3) +
+  	geom_line(data = prS, col = "grey60", lty = 1) +
+  	geom_point(aes(x = TLinfl, y = BIOinfl), size = 2.8, col = "green") +
+  	geom_hline(yintercept = bpX, lty = 2, col = "red") +
+  	ggtitle(suff) +
+  	theme_few() +
+  	coord_cartesian(ylim = c(0, 1)) +
+  	 ylab("Relative Cumulative Biomass") +
+  	xlab("TL")
+  
+
+  
+  B <- ggplot(df, aes(y, z)) +
+  	geom_point()+
+  	geom_line(data = segY, col = "grey60", lty = 1) +
+  	geom_line(lty = 3)+
+  	geom_point(aes(x = bpX, y = bpY), size = 2.8, col = "red") +
+  	geom_vline(xintercept = BIOinfl, lty = 2, col = "green") +
+  	theme_few()+
+  	coord_cartesian(ylim = c(0, 1), xlim = c(0, 1)) +
+  	 xlab("Relative Cumulative Biomass") +
+  	ylab("Relative Cumulative Production")
+  
+  
+  	A + B 
+  	
+  ggsave(here::here('out/plots', paste0(suff, '.png')), dpi = 400, height = 4.6, width = 9.5)
+  	
+  	
+  	
+  results <- 
+  	data.frame(
+  		TLinfl = TLinfl,
+  		Steepness = Steepness,
+  		BIOinfl = BIOinfl,
+  		LowA = LowA,
+  		bpX = bpX,
+  		bpY = bpY,
+  		bpAngle = bpAngle,
+  		bpTL
+  	)
+  	
+  return(results)
+  
+  
+}
+
+
+
+
+
+
+mycurve <- function(x, y, z, npoints, suff){
 	
 	# fit the model
   r <- drm(y ~ x, fct = baro5(fixed = c(NA, NA, NA, 1, NA)))
@@ -229,6 +357,9 @@ mycurve <- function(x, y, z, npoints = 5000){
   bpX <- summary(seg)$psi[2]
   bpY <- predict(seg, newdata = data.frame(y = bpX), type = "response")
   
+  # segY <- data.frame(y = seq(0, 1,length.out = npoints)) 
+  # segY$z <- predict(seg, newdata = segY, type = "response")
+  
   slope1 <- seg$coefficients[2]
   slope2 <- slope1 + seg$coefficients[3]
   
@@ -241,12 +372,45 @@ mycurve <- function(x, y, z, npoints = 5000){
   upper_index <- min(which(y >= summary(seg)$psi[2]))
   
   bpTL <- (x[lower_index] + x[upper_index]) /2
+  
+  
+  df <- data.frame(x, y, z)
+  prS <- data.frame(x = xx, y = pr)
 
-
-  
-  
-  
-  
+# 
+#   # plotting
+#   A <- ggplot(df, aes(x, y)) +
+#   	geom_point() +
+#   	geom_line(lty = 3) +
+#   	geom_line(data = prS, col = "grey60", lty = 1) +
+#   	geom_point(aes(x = TLinfl, y = BIOinfl), size = 2.8, col = "green") +
+#   	geom_hline(yintercept = bpX, lty = 2, col = "red") +
+#   	ggtitle(suff) +
+#   	theme_few() +
+#   	coord_cartesian(ylim = c(0, 1)) +
+#   	 ylab("Relative Cumulative Biomass") +
+#   	xlab("TL")
+#   
+# 
+#   
+#   B <- ggplot(df, aes(y, z)) +
+#   	geom_point()+
+#   	geom_line(data = segY, col = "grey60", lty = 1) +
+#   	geom_line(lty = 3)+
+#   	geom_point(aes(x = bpX, y = bpY), size = 2.8, col = "red") +
+#   	geom_vline(xintercept = BIOinfl, lty = 2, col = "green") +
+#   	theme_few()+
+#   	coord_cartesian(ylim = c(0, 1), xlim = c(0, 1)) +
+#   	 xlab("Relative Cumulative Biomass") +
+#   	ylab("Relative Cumulative Production")
+#   
+#   
+#   	A + B 
+#   	
+#   ggsave(here::here('out/plots', paste0(suff, '.png')), dpi = 400, height = 4.6, width = 9.5)
+#   	
+#   	
+  	
   results <- 
   	data.frame(
   		TLinfl = TLinfl,
@@ -263,7 +427,6 @@ mycurve <- function(x, y, z, npoints = 5000){
   
   
 }
-
 ```
 
 
@@ -275,7 +438,7 @@ test the function on one model
 ex <- cumbio |> filter(model.model_number == 2)
 
 
-mycurve(ex$tl, ex$ycurv, ex$pcurv)
+mycurve(ex$tl, ex$ycurv, ex$pcurv, 5000)
 
 
 ```
@@ -290,7 +453,7 @@ test on multiple moels
 library(data.table)
 dt <- data.table(cumbio)
 
-result <- dt[, mycurve(tl, ycurv, pcurv), by = .(model.model_name, model.model_number)]
+result <- dt[, mycurve(tl, ycurv, pcurv, 5000), by = .(model.model_name, model.model_number)]
 result
 
 ```
@@ -422,8 +585,11 @@ check
 ```{r}
 
 table(cumbio$model.model_number)
+table(cumbio$model.whole_food_web)
 
+table(cumbio$model.ec)
 filtered_data <- cumbio %>%
+	filter(model.whole_food_web == "true") |>
   group_by(model.model_number) %>%
   filter(n() > 10)
 
@@ -435,7 +601,8 @@ table(filtered_data$model.model_number)
 
 ```{r}
 # Get unique groups
-unique_groups <- unique(dt[, .( model.model_number)])
+unique_groups <- unique(data.table(filtered_data)[, .( model.model_number)])
+dt <- data.table(cumbio)
 
 # Loop through each group
 for(i in seq_len(nrow(unique_groups))){
@@ -449,7 +616,10 @@ for(i in seq_len(nrow(unique_groups))){
   
   # Apply the function
   tryCatch({
-    result <- subset_dt[, mycurve(tl, ycurv, pcurv)]
+    #result <- subset_dt[, mycurve(tl, ycurv, pcurv, model.model_name)]
+  	suff2 <- paste0(subset_dt$model.model_name[1], "_", subset_dt$model.model_year[1])
+    resT <- mycurvePLOTS(subset_dt$tl, subset_dt$ycurv, subset_dt$pcurv, 5000, suff2)
+    
   }, error = function(e) {
     message("Error with group: ", 
            # unique_groups[i, model.model_name], 
@@ -467,6 +637,9 @@ for(i in seq_len(nrow(unique_groups))){
 filtered_data <- filtered_data |> filter(model.model_number != 243,
 																				 model.model_number != 742,
 																				 model.model_number != 743)
+
+filtered_data$lab <- paste0()
+
 ```
 
 
@@ -474,7 +647,7 @@ filtered_data <- filtered_data |> filter(model.model_number != 243,
 ```{r}
 dt <- data.table(filtered_data)
 
-result <- dt[, mycurve(tl, ycurv, pcurv), by = .(model.model_name, model.model_number)]
+result <- dt[, mycurve(tl, ycurv, pcurv, 5000, suff), by = .(model.model_name, model.model_number)]
 result
 
 ```
