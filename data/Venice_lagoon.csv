@@ -1,0 +1,34 @@
+﻿Acronym;Group name;TL;B (t/km²);Z (/year);P/B (/year);Q/B(/year);EE;P/Q
+Pb;Piscivorous birds;4.2;0.01;;0.21;23.26;0;0.01
+Sa;Sparus aurata;3.76;0.45;1.11;;4.18;0.05;0.26
+Zoj;Zosterisessor ophiocephalus juv.;3.73;0.37;3;;3.87;0.23;0.77
+Dlj;Dicentrarchus labrax juv.;3.61;0.08;1.47;;9.42;0;0.16
+Zo;Zosterisessor ophiocephalus;3.6;0.51;2.5;;7.5;0.41;0.33
+Nc;Nekton carnivorous;3.59;0.56;;1.34;6.26;0.86;0.21
+Saj;Sparus aurata juv.;3.46;0.04;1.99;;12.2;0.84;0.16
+Dl;Dicentrarchus labrax;3.45;0.69;0.76;;3.47;0.68;0.22
+Pi;Pipefishes;3.42;0.12;;1.49;7.15;0.97;0.21
+Wa;Waders;3.36;0;;0.13;14.71;0;0.01
+Mc;Macrobenthos carnivorous;3.3;1.63;;4.96;16.84;0.64;0.29
+Ab;Atherina boyeri;3.29;0.55;;2.05;12.4;0.86;0.17
+Muj;Mugilidae juv.;3.28;0.57;2.56;;15.77;0.05;0.16
+Sgo;Small gobies;3.22;0.14;;2;8.62;1;0.23
+Cc;Crangon crangon;2.67;0.04;;2.32;14.34;0.59;0.16
+Mle;Mnemiopsis leidyi ;2.63;0;;0.11;0.29;0;0.38
+Mmf;Macrobenthos mixed-feeders;2.43;0.83;;9.22;54.46;0.95;0.17
+Mu;Mugilidae;2.39;8.82;0.97;;4.64;0.23;0.21
+Md;Macrobenthos detritivorous;2.37;5.8;;3.82;26.77;0.74;0.14
+Zoo;Zooplankton;2.26;0.52;;36;92.14;0.84;0.39
+Mff;Macrobenthos filter-feeders;2.25;0.7;;4.77;15.91;0.96;0.3
+MiMe;Micro-meiobenthos;2.14;32.57;;16.81;68.52;0.67;0.25
+Rp;Ruditapes philippinarum;2.08;11.17;2.75;;10.14;0.28;0.27
+Rpj;Ruditapes philippinarum juv.;2.03;2;4.9;;29.33;0.2;0.17
+Ba;Bacterioplankton;2;0.03;;550.5;1114.45;0.89;0.49
+Mh;Macrobenthos herbivorous;2;6.41;;7.25;34.75;0.17;0.21
+Ep;Epiphytes;1;584.57;;87.6;0;0.01;
+Ma;Macroalgae;1;76.33;;3.52;0;0.13;
+Mpb;Macrophytobenthos;1;192.46;;87.6;0;0;
+Phy;Phytoplankton;1;1.2;;525.6;0;0.1;
+Sg;Seagrasses;1;818.39;;3.29;0;0;
+SPD;Sediment detritus;1;18133.33;;;;0.04;
+WDC;Water column detritus;1;53.51;;;;0;

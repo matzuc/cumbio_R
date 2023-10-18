@@ -1,0 +1,458 @@
+---
+title: "Cumulative Biomass / Production"
+author: "MZ https://github.com/matzuc"
+format: pdf
+execute:
+  message: false
+  warning: false
+---
+
+This notebook is available at <https://github.com/matzuc/cumbio_R>
+
+## Dependancies
+
+loading required packages for running the example. For fitting the curves and estimating the parameters,  the `drc` package is needed.
+
+```{r warning=F, message=F}
+library(drc)
+library(dplyr) # data handling
+library(tidyr) # data handling
+library(purrr) # data handling
+library(ggplot2) # plotting
+library(ggthemes) # plotting
+library(viridis) # plotting
+library(here) # handling paths
+library(patchwork)
+library(ggrepel)
+
+```
+
+## Loading the dataset
+
+We use the procedure from [ecobase.ecopath.org](http://ecobase.ecopath.org/#docs "http://ecobase.ecopath.org/#docs") to read an *Ecopath* model
+
+```{r warning=F}
+library(RCurl)
+library(XML)
+library(plyr)
+
+```
+
+get the list of models
+
+```{r}
+
+#To obtain the list of available model
+h=basicTextGatherer()
+curlPerform(url = 'http://sirs.agrocampus-ouest.fr/EcoBase/php/webser/soap-client_3.php',writefunction=h$update)
+
+data<-xmlTreeParse(h$value(),useInternalNodes=TRUE)
+liste_mod<-ldply(xmlToList(data),data.frame)%>% filter(model.dissemination_allow =='true')
+        
+liste_mod[, 2:3]#contains a list and decription of available models in EcoBase  
+```
+
+
+
+## Data handling
+
+pick up one model
+
+```{r}
+mymodel <- 740
+
+
+liste_mod[which(liste_mod$model.model_number == mymodel), 2:5]
+
+```
+
+
+I extract the model `r mymodel` for the `r liste_mod$model.model_name[which(liste_mod$model.model_number == mymodel)]`
+
+```{r message=F}
+#To Obtain a model - output
+h=basicTextGatherer()
+
+curlPerform(url = paste('http://sirs.agrocampus-ouest.fr/EcoBase/php/webser/soap-client_output.php?no_model=',mymodel,sep=''),writefunction=h$update,verbose=TRUE)
+
+
+data<-xmlTreeParse(h$value(),useInternalNodes=TRUE)
+
+output1<-xpathSApply(data,'//group',function(x) xmlToList(x))
+        
+```
+
+arrange the dataset
+
+```{r}
+dat <- t(output1) |> as.data.frame()
+```
+
+
+### Cumulating biomass
+
+Cumulated biomass for TL (no TL class, here)
+
+```{r}
+
+cumbio <- dat |> 
+	mutate(p = as.numeric(biomass) * as.numeric(pb),
+				 tl = as.numeric(tl)) |>
+	arrange(tl) |> # order by TL
+	filter(tl > 2) |> # to focus on metazoan
+	mutate(ycum = cumsum(as.numeric(biomass)), pcum = cumsum(p)) |> # cumulative biomass
+	mutate(ycurv = ycum / max(ycum), pcurv = pcum/max(pcum)) #relative cumulative biomass
+	
+
+```
+
+We can plot all the curves
+
+```{r}
+ggplot(cumbio, aes(tl, ycurv)) +
+	geom_point(alpha = 0.5, size = 0.8) + 
+	geom_line(alpha = 0.6) +
+	theme_few() +
+	xlab("TL") +
+	ylab("Relative Cumulative Biomass") +
+	ggtitle("Observed cumulative biomass curves")
+
+```
+
+```{r}
+ggplot(cumbio, aes(ycurv, pcurv)) +
+	geom_point(alpha = 0.5, size = 0.8) + 
+	geom_line(alpha = 0.56) +
+	theme_few() +
+	ylab("Relative Cumulative Production") +
+	xlab("Relative Cumulative Biomass") +
+	ggtitle("cumB/cumP") 
+
+```
+
+# fit the curve
+
+load the segmented
+
+```{r}
+library(segmented)
+
+```
+
+```{r}
+# linear model
+
+oo <- lm(pcurv ~ ycurv, data=cumbio)
+
+ggplot(cumbio, aes(ycurv, pcurv)) +
+	geom_point(alpha = 0.5, size = 0.8) + 
+	geom_line(alpha = 0.56) +
+	theme_few() +
+	ylab("Relative Cumulative Production") +
+	xlab("Relative Cumulative Biomass") +
+	ggtitle("cumB/cumP") +
+	geom_abline(slope = coef(oo)[2], intercept = coef(oo)[1], lty = 2)
+
+```
+
+```{r}
+
+
+seg <- segmented.lm(oo, ~ ycurv, data=cumbio,
+										, npsi = 1)
+seg
+
+```
+
+grafico
+
+```{r}
+
+	pr <- data.frame(ycurv = seq(min(cumbio$ycurv), 1, length.out = 1000))
+
+pr$p = predict(seg, newdata = pr, type = "response")
+pr$se = predict(seg, newdata = pr, type = "response", se.fit = T)$se.fit
+
+point <- data.frame(ycurv = summary(seg)$psi[2],
+										xse = summary(seg)$psi[3])
+
+
+arcdata <- data.frame(ycurv = c(point$ycurv - 0.1, 
+																point$ycurv + 0.1))
+arcdata$p <- predict(seg, newdata = arcdata, type = "response")
+
+
+point$p <- predict(seg, newdata = point, type = "response")
+point$pse <- predict(seg, newdata = point, type = "response", se.fit = T)$se.fit
+
+
+aa <- summary(seg)
+aa$coefficients[4, 2]
+ggplot(pr, aes(ycurv, p)) +
+	#geom_point() +
+	geom_line()
+```
+
+
+explore TLs:
+
+
+```{r}
+
+# Value for which we want to find the closest values
+target <- 11
+
+# Find the index of the lower closest value
+lower_index <- max(which(cumbio$ycurv <= summary(seg)$psi[2]))
+
+# Find the index of the upper closest value
+upper_index <- min(which(cumbio$ycurv >= summary(seg)$psi[2]))
+
+TLs <- cumbio[c(lower_index, upper_index), c("tl", "pcurv", "ycurv")]
+TLs$label <- paste0("TL=", round(TLs$tl, 2))
+
+
+```
+
+compute the angle:
+
+
+```{r}
+slope1 <- seg$coefficients[2]
+slope2 <- slope1 + seg$coefficients[3]
+
+# Compute the angle between the two lines
+angle <- 180 - atan(abs((slope1 - slope2) / (1 + slope1 * slope2))) * (180 / pi)
+
+angle 
+```
+
+
+
+
+```{r}
+
+ggplot(cumbio, aes(ycurv, pcurv)) +
+	geom_point(alpha = 0.5, size = 0.8) + 
+	geom_point(data = TLs, alpha = 0.7, size = 1.2) + 
+	geom_line(alpha = 0.5) +
+	theme_few() +
+	ylab("Relative Cumulative Production") +
+ xlab("Relative Cumulative Biomass") +
+	ggtitle("cumB/cumP") +
+	geom_line(data = pr, aes(x = ycurv, y = p), col = "red", lty = 1) +
+	geom_ribbon(data = pr, aes(y = p, ymin = p-se, ymax = p + se), alpha = 0.3) +
+	geom_point(data = point, aes(x = ycurv, y = p), col = "red", size = 2.5) +
+	geom_errorbar(data = point, aes(x = ycurv, y = p, ymin = p - pse, ymax = p + pse), col = "red", width = 0.01,  alpha = 0.3) +
+	geom_errorbarh(data = point, aes(x = ycurv, y = p, xmin = ycurv - xse, xmax = ycurv + xse), col = "red", height = 0.01,  alpha = 0.3)+geom_abline( intercept =  -0.08, slope = slope1) +
+	geom_abline( intercept = 0.7, slope = slope2) +
+	coord_equal() 
+
+
+```
+
+
+```{r}
+
+ggplot(cumbio, aes(ycurv, pcurv)) +
+	geom_point(alpha = 0.5, size = 0.8) + 
+	geom_point(data = TLs, alpha = 0.7, size = 1.2) + 
+	geom_line(alpha = 0.5) +
+	theme_few() +
+	ylab("Relative Cumulative Production") +
+ xlab("Relative Cumulative Biomass") +
+	ggtitle("cumB/cumP") +
+	geom_line(data = pr, aes(x = ycurv, y = p), col = "red", lty = 1) +
+	geom_ribbon(data = pr, aes(y = p, ymin = p-se, ymax = p + se), alpha = 0.3) +
+	geom_point(data = point, aes(x = ycurv, y = p), col = "red", size = 2.5) +
+	geom_errorbar(data = point, aes(x = ycurv, y = p, ymin = p - pse, ymax = p + pse), col = "red", width = 0.01,  alpha = 0.3) +
+	geom_errorbarh(data = point, aes(x = ycurv, y = p, xmin = ycurv - xse, xmax = ycurv + xse), col = "red", height = 0.01,  alpha = 0.3) +
+	
+  geom_curve(data = arcdata, aes(x = ycurv[1], y = p[1], xend = ycurv[2], yend = p[2]), curvature = 0.5, color = "red", size = 1.5, alpha = 0.7) +
+	geom_text_repel(data = TLs, aes(x = ycurv, y = pcurv, label = label), 
+									min.segment.length = 0,
+									direction = "both", size =4, max.overlaps = 1, force = 3, force_pull = 0,
+									nudge_x = c(-0.05, 0.1), nudge_y = 0.12)
+
+
+ggsave(here::here('out', '01_cumBcumP_test.png'), height = 3.8, width = 5, dpi = 400)
+
+
+```
+
+
+
+
+```{r}
+
+
+
+A <- ggplot(cumbio, aes(ycurv, pcurv)) +
+	geom_point(alpha = 0.5, size = 0.8) + 
+	
+	geom_line(alpha = 0.5) +
+	theme_few() +
+	ylab("Relative Cumulative Production") +
+#	xlab("Relative Cumulative Biomass") +
+	ggtitle("cumB/cumP & flipped cumB/TL") +
+	geom_line(data = pr, aes(x = ycurv, y = p), col = "red", lty = 1) +
+	geom_ribbon(data = pr, aes(y = p, ymin = p-se, ymax = p + se), alpha = 0.3) +
+	geom_point(data = point, aes(x = ycurv, y = p), col = "red", size = 2.5) +
+	geom_errorbar(data = point, aes(x = ycurv, y = p, ymin = p - pse, ymax = p + pse), col = "red", width = 0.01,  alpha = 0.3) +
+	geom_errorbarh(data = point, aes(x = ycurv, y = p, xmin = ycurv - xse, xmax = ycurv + xse), col = "red", height = 0.01, alpha = 0.3) +
+	 
+  theme(axis.title.x = element_blank(),
+        axis.text.x = element_blank(),
+        axis.ticks.x = element_blank()) +
+	
+	geom_vline(xintercept = point$ycurv, colour = "red", lty = 2, alpha = 0.3)+
+	geom_vline(xintercept = point$ycurv - point$xse, colour = "red", lty = 3, alpha = 0.3)+
+	geom_vline(xintercept = point$ycurv +  point$xse, colour = "red", lty = 3, alpha = 0.3) +
+	
+	coord_cartesian(xlim = c(0, 1))
+	
+
+
+A
+```
+
+or just focus on one curve:
+
+```{r}
+B <- ggplot(cumbio, aes(ycurv, tl)) +
+	geom_point(alpha = 0.5, size = 0.8) + 
+	geom_line(alpha = 0.5) +
+	theme_few() +
+	ylab("TL") +
+	xlab("Relative Cumulative Biomass") +
+	
+	
+	geom_vline(xintercept = point$ycurv, colour = "red", lty = 2, alpha = 0.3)+
+	geom_vline(xintercept = point$ycurv - point$xse, colour = "red", lty = 3, alpha = 0.3)+
+	geom_vline(xintercept = point$ycurv +  point$xse, colour = "red", lty = 3, alpha = 0.3) +
+	coord_cartesian(xlim = c(0, 1))
+```
+
+## Combine the curves
+
+```{r}
+A/B
+```
+
+function for the S curve
+
+```{r}
+
+
+
+
+mycurve <- function(x, y, npoints = 5000){
+	
+	# fit the model
+  r <- drm(y ~ x, fct = baro5(fixed = c(NA, NA, NA, 1, NA)))
+
+  # use the fitted curve to predict the expected values (these are used fot plotting and estimating the parameters)
+  
+  # xx are the TLs
+  xx <- NA;
+  xx <- seq(1.6, 5,length.out = npoints)
+  pr <- NA; length(pr) <- npoints# vector for prediction
+  pr <- predict(r, newdata = data.frame(x = xx))
+
+  # parameters
+  
+  dpr<-diff(pr,1)/diff(xx)
+  
+  # TL @ inflection point 
+  TLinfl <- xx[which.max(dpr)-1]
+  # maximum steepness
+  Steepness <- max(dpr)
+  # Biomass @ inflection
+  BIOinfl<- predict(r, newdata=data.frame(x = TLinfl)) 
+  # Lower asymptote
+  LowA <- predict(r, newdata=data.frame(x=1))
+
+  
+  
+  
+  results <- list(
+  	curve = data.frame(x = xx, y = pr),
+  	parameters = 	data.frame(LowA = LowA, Steepness = Steepness, TLinfl = TLinfl, BIOinfl = BIOinfl) 
+  )
+  	
+  return(results)
+  
+  
+}
+
+```
+
+We use the function on the small example
+
+```{r}
+out_ex <- mycurve(cumbio$tl, cumbio$ycurv)
+```
+
+And see how the curve looks like
+
+```{r}
+
+
+intercept <- out_ex$parameters$BIOinfl - out_ex$parameters$Steepness * out_ex$parameters$TLinfl
+
+
+ggplot(cumbio, aes(tl, ycurv)) +
+	geom_point(alpha = 0.5, size = 0.8) + 
+	geom_line(alpha = 0.5) +
+	theme_few() +
+	xlab("TL") +
+	ylab("Relative Cumulative Biomass") +
+	
+	geom_line(data = out_ex$curve, aes(x = x, y = y), size = 1.1, alpha = 0.6) +
+	ggtitle("Fitted curve") +
+	geom_abline(aes(intercept = intercept, slope = out_ex$parameters$Steepness), colour = "blue", lty = 2, alpha = 0.8) +
+	geom_segment(data = out_ex$parameters, aes(x = TLinfl, y = BIOinfl,
+									 xend = min(out_ex$curve$x), yend = BIOinfl), size = 0.8, lty = 1, alpha = 0.8, colour = "green", arrow=arrow()) +
+	geom_segment(data = out_ex$parameters, aes(x = TLinfl, y = BIOinfl,
+									 xend = TLinfl, yend = 0), size = 0.8, lty = 1, alpha = 0.8, colour = "green", arrow=arrow()) +
+	geom_point(data = out_ex$parameters, aes(x = TLinfl, y = BIOinfl), colour = "red", size = 1.6) +
+	geom_hline(yintercept = point$ycurv, colour = "red", lty = 2)+
+	geom_hline(yintercept = point$ycurv - point$xse, colour = "red", lty = 3)+
+	geom_hline(yintercept = point$ycurv +  point$xse, colour = "red", lty = 3)
+
+
+ggsave(here::here('out', '01_cumBcumP_cumB_Scurve.png'), height = 3.8, width = 5, dpi = 400)
+
+
+
+```
+
+swap x & y
+
+```{r}
+
+B <- ggplot(cumbio, aes(ycurv, tl)) +
+	geom_point(alpha = 0.5, size = 0.8) + 
+	geom_line(alpha = 0.5) +
+	theme_few() +
+	ylab("TL") +
+	xlab("Relative Cumulative Biomass") +
+	geom_line(data = out_ex$curve, aes(x = y, y = x), size = 1.1, alpha = 0.6) +
+	geom_point(data = out_ex$parameters, aes(y = TLinfl, x = BIOinfl), colour = "green", size = 3) +
+	coord_cartesian(xlim = c(0, 1)) +
+	geom_vline(xintercept = point$ycurv, colour = "red", lty = 2, alpha = 0.3)+
+	geom_vline(xintercept = point$ycurv - point$xse, colour = "red", lty = 3, alpha = 0.3)+
+	geom_vline(xintercept = point$ycurv +  point$xse, colour = "red", lty = 3, alpha = 0.3)
+	
+
+
+B
+```
+
+combine the plots
+
+```{r}
+A/B
+
+ggsave(here::here('out', '01_cumBcumP_test_combined.png'), height = 6, width = 5, dpi = 400)
+```

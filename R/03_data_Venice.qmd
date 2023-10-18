@@ -1,0 +1,64 @@
+---
+title: "Venice lagoon data from Anelli Monti et al., 2021"
+author: "MZ https://github.com/matzuc"
+format: pdf
+execute:
+  message: false
+  warning: false
+---
+
+This notebook is available at <https://github.com/matzuc/cumbio_R>
+
+## Dependancies
+
+loading required packages for running the example. For fitting the curves and estimating the parameters,  the `drc` package is needed.
+
+```{r warning=F, message=F}
+library(drc)
+library(dplyr) # data handling
+library(ggplot2) # plotting
+library(ggthemes) # plotting
+library(ggrepel) # plotting
+```
+
+## Loading the dataset
+
+
+
+```{r warning=F}
+dat <- read.csv(here::here("data", "Venice_lagoon.csv"), header = T, sep = ";")
+
+```
+
+```{r}
+cumB <- dat |> filter(TL >2.4) |> arrange(TL) |> mutate(cumB = cumsum(B..t.km..))
+```
+
+
+
+```{r}
+ggplot(cumB, aes(x = TL, y = cumB)) +
+  geom_point() +
+  theme_bw() +
+	# smooth with baro5 from drc package
+  theme(legend.position = "none") +
+	labs(x = "TL (km)", y = "cumulative biomass (t/km2)") +
+	geom_text_repel(aes(label = Acronym), colour = "grey30")
+```
+
+change variables name
+
+```{r}
+names(dat)[c(4:7, 9)] <- c("B", "Z", "PB", "QB", "PQ")
+
+
+```
+save the dataset
+```{r}
+venicelagoon <- dat
+```
+
+```{r}
+save(venicelagoon, file = here::here("data", "venicelagoon.RData"))
+```
+

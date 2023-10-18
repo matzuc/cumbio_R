@@ -1,0 +1,100 @@
+---
+title: "Test functions for cumulative biomass"
+author: "MZ https://github.com/matzuc"
+format: pdf
+execute:
+  message: false
+  warning: false
+---
+
+This notebook is available at <https://github.com/matzuc/cumbio_R>
+
+## Dependancies
+
+loading required packages for running the example. For fitting the curves and estimating the parameters,  the `drc` package is needed.
+
+```{r warning=F, message=F}
+library(drc)
+library(dplyr) # data handling
+library(ggplot2) # plotting
+library(ggthemes) # plotting
+library(ggrepel) # plotting
+library(cumB)
+```
+
+## Loading the dataset
+
+Load the Venice lagoon dataset
+
+
+```{r warning=F}
+data(venicelagoon)
+
+```
+
+
+```{r}
+
+cumB <- venicelagoon |> filter(TL >2.4) |> arrange(TL) |> mutate(cumB = cumsum(B)) |> 
+	# divide by the maximum value
+	mutate(cumBst = cumB/max(cumB))
+
+```
+
+we can use the function
+
+```{r}
+cumBst <- cumBdata(venicelagoon, "TL", "B", threshold = 2.4)
+```
+
+
+
+```{r}
+A <- ggplot(cumBst, aes(x = TL, y = cumBst)) +
+  geom_point() +
+  theme_bw() +
+	# smooth with baro5 from drc package
+  theme(legend.position = "none") +
+	labs(x = "TL (km)", y = "cumulative biomass (t/km2)") +
+	geom_text_repel(aes(label = Acronym), colour = "grey30")
+
+A
+```
+
+test of the fitting function
+
+```{r}
+fit <- cumBfit(x = cumBst$TL, y = cumBst$cumBst)
+
+```
+
+
+```{r}
+
+plot(fit$curve)
+
+curv <- fit$curve
+cumdata <- fit$data
+
+```
+
+```{r}
+predict(fit$model, newdata = data.frame(x = 2.4), interval = "prediction", se.fit = TRUE)
+
+```
+
+```{r}
+```
+
+```{r}
+
+
+
+```
+
+```{r}
+
+A <- A + geom_line(data = fit$curve, aes(x, y), colour = "red")
+A
+```
+
