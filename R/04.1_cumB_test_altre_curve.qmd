@@ -1,0 +1,134 @@
+---
+title: "Test functions for cumulative biomass"
+author: "MZ https://github.com/matzuc"
+format: pdf
+execute:
+  message: false
+  warning: false
+---
+
+This notebook is available at <https://github.com/matzuc/cumbio_R>
+
+## Dependancies
+
+loading required packages for running the example. For fitting the curves and estimating the parameters,  the `drc` package is needed.
+
+```{r warning=F, message=F}
+library(drc)
+library(dplyr) # data handling
+library(ggplot2) # plotting
+library(ggthemes) # plotting
+library(ggrepel) # plotting
+library(cumB)
+```
+
+## Loading the dataset
+
+Load the Venice lagoon dataset
+
+
+```{r warning=F}
+data(venicelagoon)
+
+```
+
+
+```{r}
+
+cumB <- venicelagoon |> filter(TL >2.0) |> arrange(TL) |> mutate(cumB = cumsum(B)) |> 
+	# divide by the maximum value
+	mutate(cumBst = cumB/max(cumB))
+
+```
+
+we can use the function
+
+```{r}
+cumBst <- cumBdata(venicelagoon, "TL", "B", threshold = 2.4)
+```
+
+
+
+```{r}
+A <- ggplot(cumBst, aes(x = TL, y = cumBst)) +
+  geom_point() +
+  theme_bw() +
+	# smooth with baro5 from drc package
+  theme(legend.position = "none") +
+	labs(x = "TL (km)", y = "cumulative biomass (%)") +
+	geom_text_repel(aes(label = Acronym), colour = "grey30")
+
+A
+```
+
+test of the fitting function
+
+```{r}
+fit <- cumBfit(x = cumBst$TL, y = cumBst$cumBst)
+
+```
+
+
+
+
+
+```{r}
+predict(fit$model, newdata = data.frame(x = 2.4), interval = "prediction", se.fit = TRUE)
+
+
+A <- A + geom_line(data = fit$curve, aes(x, y), colour = "red")
+A
+```
+
+
+we can try different models
+
+
+```{r}
+ fit$model
+
+summary(fit$model)
+predict(fit$model, newdata = data.frame(x = 2.4), interval = "prediction", se.fit = TRUE)
+
+
+```
+
+
+
+```{r}
+ # fit the model
+  r <- drm(cumBst ~ TL,  fct = LL.5(fixed = c(NA, NA, NA, 1,  NA)), data = cumBst)
+   predict(r, newdata = data.frame(x = 3.2), se.fit = TRUE, interval = "confidence")
+  # use the fitted curve to predict the expected values (these are used fot plotting and estimating the parameters)
+
+  # xx are the TLs
+  xx <- NA;
+  xx <- seq(1.6, 5,length.out = 1000)
+  pr <- NA; length(pr) <- npoints# vector for prediction
+  pr <- predict(r, newdata = data.frame(x = xx))
+ 
+
+  # parameters
+
+  dpr <- diff(pr,1)/diff(xx)
+
+  # TL @ inflection point
+  TLinfl <- xx[which.max(dpr)-1]
+  # maximum steepness
+  Steepness <- max(dpr)
+  # Biomass @ inflection
+  BIOinfl<- predict(r, newdata=data.frame(x = TLinfl))
+  # Lower asymptote
+  LowA <- predict(r, newdata=data.frame(x=1))
+
+
+B <- A + geom_line(data = data.frame(x = xx, y = pr), aes(x, y), colour = "blue")
+B
+
+
+
+
+
+
+```
+
